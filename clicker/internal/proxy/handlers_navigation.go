@@ -3,6 +3,7 @@ package proxy
 import (
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,6 +26,19 @@ func (r *Router) handlePageNavigate(session *BrowserSession, cmd bidiCommand) {
 	if err := Navigate(s, context, url, wait); err != nil {
 		r.sendError(session, cmd.ID, err)
 		return
+	}
+
+	// Capture filmstrip screenshot while page is in its clean post-navigate state,
+	// before sendSuccess unblocks the client to send further commands.
+	session.mu.Lock()
+	recorder := session.traceRecorder
+	session.mu.Unlock()
+	if recorder != nil && recorder.IsRecording() {
+		opts := recorder.Options()
+		if opts.Screenshots {
+			r.capturePostActionScreenshot(session, recorder, cmd.Params, time.Now())
+			atomic.StoreInt32(&session.handlerScreenshot, 1)
+		}
 	}
 
 	r.sendSuccess(session, cmd.ID, map[string]interface{}{"url": url})

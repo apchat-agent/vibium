@@ -230,6 +230,29 @@ func (r *Router) captureScreenshotForTrace(session *BrowserSession, opts Tracing
 	return ssResult.Result.Data, context, nil
 }
 
+// captureBeforeSnapshotAfterScroll captures a before-snapshot for click-like
+// actions after the element has been scrolled into view. Called from handlers
+// between resolveWithActionability and the actual input action.
+func (r *Router) captureBeforeSnapshotAfterScroll(session *BrowserSession, params map[string]interface{}) {
+	callId, _ := params["_traceCallId"].(string)
+	if callId == "" {
+		return
+	}
+	session.mu.Lock()
+	recorder := session.traceRecorder
+	session.mu.Unlock()
+	if recorder == nil || !recorder.IsRecording() {
+		return
+	}
+	if !recorder.Options().Snapshots {
+		return
+	}
+	name := r.captureActionSnapshot(session, recorder, params, callId, "before")
+	if name != "" {
+		recorder.PatchBeforeSnapshot(callId, name)
+	}
+}
+
 // captureActionSnapshot captures a screenshot and wraps it as a frame-snapshot
 // for the Playwright trace viewer. Returns the snapshot name (e.g. "before@call@1")
 // or "" on failure.
@@ -332,7 +355,9 @@ func (r *Router) captureActionSnapshot(session *BrowserSession, recorder *TraceR
 // capturePostActionScreenshot captures a screenshot after an action handler completes.
 // It extracts the browsing context from the command's own params so each concurrent
 // goroutine resolves its own context independently — no cross-goroutine race.
-func (r *Router) capturePostActionScreenshot(session *BrowserSession, recorder *TraceRecorder, params map[string]interface{}) {
+// actionEnd is used as the screencast-frame timestamp so the screenshot aligns with
+// the action's endTime in the trace timeline rather than the (later) capture time.
+func (r *Router) capturePostActionScreenshot(session *BrowserSession, recorder *TraceRecorder, params map[string]interface{}, actionEnd time.Time) {
 	session.mu.Lock()
 	closed := session.closed
 	session.mu.Unlock()
@@ -384,5 +409,5 @@ func (r *Router) capturePostActionScreenshot(session *BrowserSession, recorder *
 	}
 
 	w, h := imageDimensions(imgData)
-	recorder.AddScreenshot(imgData, context, w, h)
+	recorder.AddScreenshot(imgData, context, w, h, actionEnd)
 }

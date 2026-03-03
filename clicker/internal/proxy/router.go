@@ -47,6 +47,8 @@ type BrowserSession struct {
 	lastURL            string   // last known page URL, updated from load/navigation events
 	lastElementBox     *BoxInfo // last resolved element box, for trace recording
 	screenshotInFlight int32    // atomic; 1 = screenshot capture in progress
+	handlerScreenshot  int32    // atomic; 1 = handler already captured filmstrip screenshot
+	dispatchMu         sync.Mutex // serializes dispatch goroutines so screenshots capture correct page state
 }
 
 // SetLastElementBox stores the bounding box of the last resolved element for trace recording.
@@ -190,17 +192,18 @@ func (r *Router) OnClientConnect(client ClientTransport) {
 // vibiumHandler is the signature for vibium: extension command handlers.
 type vibiumHandler func(*BrowserSession, bidiCommand)
 
-// isClickLikeAction returns true for actions where the before-state is most
-// meaningful (e.g. seeing the element about to be clicked). Only a before-
-// snapshot is captured for these. All other actions capture an after-snapshot
-// to show the result (e.g. filled text, navigated page).
-func isClickLikeAction(method string) bool {
+// handlerCapturesBefore returns true for interaction actions whose handlers
+// capture the before-snapshot after scrolling the element into view (via
+// resolveWithActionability). For these, dispatch() injects _traceCallId and
+// the handler calls captureBeforeSnapshotAfterScroll between resolve and act.
+// This includes both click-like actions (before-only) and fill-like actions
+// (before in handler + after in dispatch).
+func handlerCapturesBefore(method string) bool {
 	switch method {
 	case "vibium:click", "vibium:dblclick", "vibium:hover", "vibium:tap",
-		"vibium:check", "vibium:uncheck", "vibium:focus",
-		"vibium:scrollIntoView", "vibium:dragTo", "vibium:dispatchEvent",
-		"vibium:mouse.click", "vibium:mouse.move", "vibium:mouse.down", "vibium:mouse.up",
-		"vibium:touch.tap":
+		"vibium:check", "vibium:uncheck", "vibium:dragTo",
+		"vibium:fill", "vibium:type", "vibium:press", "vibium:clear",
+		"vibium:selectOption":
 		return true
 	}
 	return false
@@ -209,22 +212,27 @@ func isClickLikeAction(method string) bool {
 // dispatch wraps a vibium handler with automatic action tracing.
 func (r *Router) dispatch(session *BrowserSession, cmd bidiCommand, handler vibiumHandler) {
 	go func() {
+		session.dispatchMu.Lock()
+		defer session.dispatchMu.Unlock()
+
 		session.mu.Lock()
 		recorder := session.traceRecorder
 		session.mu.Unlock()
 
 		var callId string
-		clickLike := isClickLikeAction(cmd.Method)
 
 		if recorder != nil && recorder.IsRecording() {
 			callId = recorder.NextCallId()
 			opts := recorder.Options()
 
-			// Click-like actions capture a before-snapshot (what's about to be clicked).
-			// Fill-like actions skip the before-snapshot and capture after instead.
+			// Interaction handlers (click, fill, etc.) capture the before-snapshot
+			// inside the handler after scrolling the element into view, so the
+			// screenshot matches the element overlay position. We inject the
+			// callId so the handler knows the trace context.
+			// All other actions get their before-snapshot captured here.
 			var beforeSnapshot string
-			if opts.Snapshots && clickLike {
-				beforeSnapshot = r.captureActionSnapshot(session, recorder, cmd.Params, callId, "before")
+			if opts.Snapshots && handlerCapturesBefore(cmd.Method) {
+				cmd.Params["_traceCallId"] = callId
 			}
 
 			session.mu.Lock()
@@ -235,6 +243,9 @@ func (r *Router) dispatch(session *BrowserSession, cmd bidiCommand, handler vibi
 		}
 
 		handler(session, cmd)
+
+		// Clean up internal tracing field so it doesn't appear in trace output
+		delete(cmd.Params, "_traceCallId")
 
 		// Capture endTime immediately after handler returns, before screenshot captures
 		endTime := time.Now()
@@ -248,16 +259,16 @@ func (r *Router) dispatch(session *BrowserSession, cmd bidiCommand, handler vibi
 		if recorder != nil && recorder.IsRecording() {
 			opts := recorder.Options()
 
-			// Fill-like actions capture an after-snapshot (the result of the action).
-			// Click-like actions already captured their snapshot before the handler.
+			// Capture an after-snapshot to show the result of the action.
 			var afterSnapshot string
-			if opts.Snapshots && !clickLike {
+			if opts.Snapshots {
 				afterSnapshot = r.captureActionSnapshot(session, recorder, cmd.Params, callId, "after")
 			}
 
-			// Filmstrip screenshot (CAS-guarded to avoid flooding Chrome)
-			if opts.Screenshots && atomic.CompareAndSwapInt32(&session.screenshotInFlight, 0, 1) {
-				r.capturePostActionScreenshot(session, recorder, cmd.Params)
+			// Skip if handler already captured a screenshot (e.g. navigate).
+			handlerCapturedSS := atomic.CompareAndSwapInt32(&session.handlerScreenshot, 1, 0)
+			if opts.Screenshots && !handlerCapturedSS && atomic.CompareAndSwapInt32(&session.screenshotInFlight, 0, 1) {
+				r.capturePostActionScreenshot(session, recorder, cmd.Params, endTime)
 				atomic.StoreInt32(&session.screenshotInFlight, 0)
 			}
 

@@ -331,6 +331,21 @@ func (t *TraceRecorder) NextCallId() string {
 	return fmt.Sprintf("call@%d", t.actionCounter)
 }
 
+// PatchBeforeSnapshot retroactively adds a beforeSnapshot to an already-emitted
+// "before" event. This is used by click-like handlers that capture the snapshot
+// after scrolling the element into view (via resolveWithActionability) but before
+// the actual click/hover/tap action.
+func (t *TraceRecorder) PatchBeforeSnapshot(callId, snapshotName string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for i := len(t.events) - 1; i >= 0; i-- {
+		if t.events[i]["callId"] == callId && t.events[i]["type"] == "before" {
+			t.events[i]["beforeSnapshot"] = snapshotName
+			return
+		}
+	}
+}
+
 // RecordAction records a vibium command as an action marker in the trace.
 // The callId should come from NextCallId(). beforeSnapshot is the snapshot name
 // (from AddFrameSnapshot) to link, or "" if none. pageId is a fallback browsing
@@ -461,12 +476,17 @@ func (t *TraceRecorder) RecordBidiCommandEnd(callId string) {
 }
 
 // AddScreenshot stores a screenshot image (PNG or JPEG) and adds a screencast-frame event.
-func (t *TraceRecorder) AddScreenshot(pngData []byte, pageID string, width, height int) {
+// If ts is non-zero it is used as the event timestamp; otherwise time.Now() is used.
+func (t *TraceRecorder) AddScreenshot(pngData []byte, pageID string, width, height int, ts time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if !t.recording {
 		return
+	}
+
+	if ts.IsZero() {
+		ts = time.Now()
 	}
 
 	hash := sha1Hex(pngData)
@@ -477,7 +497,7 @@ func (t *TraceRecorder) AddScreenshot(pngData []byte, pageID string, width, heig
 		"sha1":      hash,
 		"width":     width,
 		"height":    height,
-		"timestamp": float64(time.Now().UnixMilli()),
+		"timestamp": float64(ts.UnixMilli()),
 	})
 }
 
@@ -903,7 +923,7 @@ func (t *TraceRecorder) StartScreenshotLoop(captureFunc func() (string, string, 
 				}
 
 				w, h := imageDimensions(imgData)
-				t.AddScreenshot(imgData, pageID, w, h)
+				t.AddScreenshot(imgData, pageID, w, h, time.Time{})
 			}
 		}
 	}()

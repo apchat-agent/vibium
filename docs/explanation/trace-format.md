@@ -109,7 +109,7 @@ Every vibium command emits a `before`/`after` pair automatically — both mutati
 | `params` | object | The command parameters as sent by the client. |
 | `pageId` | string | Browsing context ID of the page the action targets. Present on actions, absent on groups. |
 | `parentId` | string | `call@<N>` of the enclosing action group, if the action is inside a `startGroup()`/`stopGroup()` span. Absent for top-level actions. |
-| `beforeSnapshot` | string | `"before@call@<N>"` — references the `snapshotName` of a `frame-snapshot` event captured before the action ran. Present on `click` actions (which mutate the DOM), absent on other actions. Mutually exclusive with `afterSnapshot` on the corresponding `after` event. |
+| `beforeSnapshot` | string | `"before@call@<N>"` — references the `snapshotName` of a `frame-snapshot` event captured before the action ran. Present on interaction actions (`click`, `fill`, `hover`, etc.) that resolve an element — the snapshot is taken after scrolling the element into view. Click-like actions (`click`, `dblclick`, `hover`, `tap`, `check`, `uncheck`, `dragTo`) have `beforeSnapshot` only. Fill-like actions (`fill`, `type`, `press`, `clear`, `selectOption`) have both `beforeSnapshot` and `afterSnapshot`. Query actions (`find`, `text`, `navigate`, etc.) have `afterSnapshot` only. |
 
 **`input` fields** (emitted for element-targeting actions only):
 
@@ -127,7 +127,7 @@ Present for actions that resolve an element (`click`, `fill`, `hover`, `type`, `
 |-------|------|-------------|
 | `callId` | string | `call@<N>` — matches the corresponding `before` event. |
 | `endTime` | number | Unix ms when the action completed. |
-| `afterSnapshot` | string | `"after@call@<N>"` — references the `snapshotName` of a `frame-snapshot` event captured after the action completed. Present on most actions (`navigate`, `fill`, `find`, `text`, etc.) but absent on `click` actions (which use `beforeSnapshot` instead) and absent on groups. |
+| `afterSnapshot` | string | `"after@call@<N>"` — references the `snapshotName` of a `frame-snapshot` event captured after the action completed. Present on fill-like actions (`fill`, `type`, `press`, `clear`, `selectOption`) and all non-interaction actions (`navigate`, `find`, `text`, etc.). Absent on click-like actions (`click`, `dblclick`, `hover`, `tap`, `check`, `uncheck`, `dragTo`) which use `beforeSnapshot` only, and absent on groups. |
 
 The `dispatch()` wrapper in the router records these markers — every vibium command that goes through `dispatch()` gets traced. Tracing commands themselves (`tracing.start`, `tracing.stop`, etc.) are excluded since they control tracing.
 

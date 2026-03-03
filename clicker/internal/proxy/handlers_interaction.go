@@ -20,7 +20,13 @@ func (r *Router) handleVibiumClick(session *BrowserSession, cmd bidiCommand) {
 	}
 
 	s := NewProxySession(r, session, context)
-	if err := Click(s, context, ep); err != nil {
+	info, err := resolveWithActionability(s, context, ep, ClickChecks)
+	if err != nil {
+		r.sendError(session, cmd.ID, err)
+		return
+	}
+	r.captureBeforeSnapshotAfterScroll(session, cmd.Params)
+	if err := ClickAtCenter(s, context, info); err != nil {
 		r.sendError(session, cmd.ID, err)
 		return
 	}
@@ -39,7 +45,13 @@ func (r *Router) handleVibiumDblclick(session *BrowserSession, cmd bidiCommand) 
 	}
 
 	s := NewProxySession(r, session, context)
-	if err := DblClick(s, context, ep); err != nil {
+	info, err := resolveWithActionability(s, context, ep, ClickChecks)
+	if err != nil {
+		r.sendError(session, cmd.ID, err)
+		return
+	}
+	r.captureBeforeSnapshotAfterScroll(session, cmd.Params)
+	if err := DblClickAtCenter(s, context, info); err != nil {
 		r.sendError(session, cmd.ID, err)
 		return
 	}
@@ -60,8 +72,24 @@ func (r *Router) handleVibiumFill(session *BrowserSession, cmd bidiCommand) {
 	}
 
 	s := NewProxySession(r, session, context)
-	if err := Fill(s, context, ep, value); err != nil {
+	if _, err := resolveWithActionability(s, context, ep, FillChecks); err != nil {
 		r.sendError(session, cmd.ID, err)
+		return
+	}
+	r.captureBeforeSnapshotAfterScroll(session, cmd.Params)
+	script, args := buildSetValueScript(ep, value)
+	resp, err := CallScript(s, context, script, args)
+	if err != nil {
+		r.sendError(session, cmd.ID, err)
+		return
+	}
+	val, err := parseScriptResult(resp)
+	if err != nil {
+		r.sendError(session, cmd.ID, fmt.Errorf("fill failed: %w", err))
+		return
+	}
+	if val != "ok" {
+		r.sendError(session, cmd.ID, fmt.Errorf("fill: %s", val))
 		return
 	}
 
@@ -89,7 +117,17 @@ func (r *Router) handleVibiumType(session *BrowserSession, cmd bidiCommand) {
 	}
 
 	s := NewProxySession(r, session, context)
-	if err := TypeInto(s, context, ep, text); err != nil {
+	info, err := resolveWithActionability(s, context, ep, ClickChecks)
+	if err != nil {
+		r.sendError(session, cmd.ID, err)
+		return
+	}
+	r.captureBeforeSnapshotAfterScroll(session, cmd.Params)
+	if err := ClickAtCenter(s, context, info); err != nil {
+		r.sendError(session, cmd.ID, err)
+		return
+	}
+	if err := TypeText(s, context, text); err != nil {
 		r.sendError(session, cmd.ID, err)
 		return
 	}
@@ -110,7 +148,17 @@ func (r *Router) handleVibiumPress(session *BrowserSession, cmd bidiCommand) {
 	}
 
 	s := NewProxySession(r, session, context)
-	if err := PressOn(s, context, ep, key); err != nil {
+	info, err := resolveWithActionability(s, context, ep, ClickChecks)
+	if err != nil {
+		r.sendError(session, cmd.ID, err)
+		return
+	}
+	r.captureBeforeSnapshotAfterScroll(session, cmd.Params)
+	if err := ClickAtCenter(s, context, info); err != nil {
+		r.sendError(session, cmd.ID, err)
+		return
+	}
+	if err := PressKey(s, context, key); err != nil {
 		r.sendError(session, cmd.ID, err)
 		return
 	}
@@ -130,8 +178,24 @@ func (r *Router) handleVibiumClear(session *BrowserSession, cmd bidiCommand) {
 	}
 
 	s := NewProxySession(r, session, context)
-	if err := Fill(s, context, ep, ""); err != nil {
+	if _, err := resolveWithActionability(s, context, ep, FillChecks); err != nil {
 		r.sendError(session, cmd.ID, err)
+		return
+	}
+	r.captureBeforeSnapshotAfterScroll(session, cmd.Params)
+	script, args := buildSetValueScript(ep, "")
+	resp, err := CallScript(s, context, script, args)
+	if err != nil {
+		r.sendError(session, cmd.ID, err)
+		return
+	}
+	val, err := parseScriptResult(resp)
+	if err != nil {
+		r.sendError(session, cmd.ID, fmt.Errorf("clear failed: %w", err))
+		return
+	}
+	if val != "ok" {
+		r.sendError(session, cmd.ID, fmt.Errorf("clear: %s", val))
 		return
 	}
 
@@ -150,9 +214,22 @@ func (r *Router) handleVibiumCheck(session *BrowserSession, cmd bidiCommand) {
 	}
 
 	s := NewProxySession(r, session, context)
-	if _, err := Check(s, context, ep); err != nil {
+	info, err := resolveWithActionability(s, context, ep, ClickChecks)
+	if err != nil {
 		r.sendError(session, cmd.ID, err)
 		return
+	}
+	r.captureBeforeSnapshotAfterScroll(session, cmd.Params)
+	checked, err := IsChecked(s, context, ep)
+	if err != nil {
+		r.sendError(session, cmd.ID, err)
+		return
+	}
+	if !checked {
+		if err := ClickAtCenter(s, context, info); err != nil {
+			r.sendError(session, cmd.ID, err)
+			return
+		}
 	}
 
 	r.sendSuccess(session, cmd.ID, map[string]interface{}{"checked": true})
@@ -170,9 +247,22 @@ func (r *Router) handleVibiumUncheck(session *BrowserSession, cmd bidiCommand) {
 	}
 
 	s := NewProxySession(r, session, context)
-	if _, err := Uncheck(s, context, ep); err != nil {
+	info, err := resolveWithActionability(s, context, ep, ClickChecks)
+	if err != nil {
 		r.sendError(session, cmd.ID, err)
 		return
+	}
+	r.captureBeforeSnapshotAfterScroll(session, cmd.Params)
+	checked, err := IsChecked(s, context, ep)
+	if err != nil {
+		r.sendError(session, cmd.ID, err)
+		return
+	}
+	if checked {
+		if err := ClickAtCenter(s, context, info); err != nil {
+			r.sendError(session, cmd.ID, err)
+			return
+		}
 	}
 
 	r.sendSuccess(session, cmd.ID, map[string]interface{}{"unchecked": true})
@@ -191,8 +281,24 @@ func (r *Router) handleVibiumSelectOption(session *BrowserSession, cmd bidiComma
 	}
 
 	s := NewProxySession(r, session, context)
-	if err := SelectOption(s, context, ep, value); err != nil {
+	if _, err := resolveWithActionability(s, context, ep, SelectChecks); err != nil {
 		r.sendError(session, cmd.ID, err)
+		return
+	}
+	r.captureBeforeSnapshotAfterScroll(session, cmd.Params)
+	script, args := buildSelectOptionScript(ep, value)
+	resp, err := CallScript(s, context, script, args)
+	if err != nil {
+		r.sendError(session, cmd.ID, err)
+		return
+	}
+	val, err := parseScriptResult(resp)
+	if err != nil {
+		r.sendError(session, cmd.ID, fmt.Errorf("selectOption failed: %w", err))
+		return
+	}
+	if val != "ok" {
+		r.sendError(session, cmd.ID, fmt.Errorf("selectOption: %s", val))
 		return
 	}
 
@@ -211,7 +317,13 @@ func (r *Router) handleVibiumHover(session *BrowserSession, cmd bidiCommand) {
 	}
 
 	s := NewProxySession(r, session, context)
-	if err := Hover(s, context, ep); err != nil {
+	info, err := resolveWithActionability(s, context, ep, HoverChecks)
+	if err != nil {
+		r.sendError(session, cmd.ID, err)
+		return
+	}
+	r.captureBeforeSnapshotAfterScroll(session, cmd.Params)
+	if err := HoverAtCenter(s, context, info); err != nil {
 		r.sendError(session, cmd.ID, err)
 		return
 	}
@@ -259,7 +371,44 @@ func (r *Router) handleVibiumDragTo(session *BrowserSession, cmd bidiCommand) {
 	targetEp := ExtractElementParams(targetParams)
 
 	s := NewProxySession(r, session, context)
-	if err := DragTo(s, context, ep, targetEp); err != nil {
+	srcInfo, err := resolveWithActionability(s, context, ep, HoverChecks)
+	if err != nil {
+		r.sendError(session, cmd.ID, fmt.Errorf("source: %w", err))
+		return
+	}
+	r.captureBeforeSnapshotAfterScroll(session, cmd.Params)
+	targetInfo, err := resolveWithActionability(s, context, targetEp, HoverChecks)
+	if err != nil {
+		r.sendError(session, cmd.ID, fmt.Errorf("target: %w", err))
+		return
+	}
+
+	srcX := int(srcInfo.Box.X + srcInfo.Box.Width/2)
+	srcY := int(srcInfo.Box.Y + srcInfo.Box.Height/2)
+	dstX := int(targetInfo.Box.X + targetInfo.Box.Width/2)
+	dstY := int(targetInfo.Box.Y + targetInfo.Box.Height/2)
+
+	dragParams := map[string]interface{}{
+		"context": context,
+		"actions": []map[string]interface{}{
+			{
+				"type": "pointer",
+				"id":   "mouse",
+				"parameters": map[string]interface{}{
+					"pointerType": "mouse",
+				},
+				"actions": []map[string]interface{}{
+					{"type": "pointerMove", "x": srcX, "y": srcY, "duration": 0},
+					{"type": "pointerDown", "button": 0},
+					{"type": "pause", "duration": 100},
+					{"type": "pointerMove", "x": dstX, "y": dstY, "duration": 200},
+					{"type": "pointerUp", "button": 0},
+				},
+			},
+		},
+	}
+
+	if _, err := s.SendBidiCommand("input.performActions", dragParams); err != nil {
 		r.sendError(session, cmd.ID, err)
 		return
 	}
@@ -279,7 +428,13 @@ func (r *Router) handleVibiumTap(session *BrowserSession, cmd bidiCommand) {
 	}
 
 	s := NewProxySession(r, session, context)
-	if err := Tap(s, context, ep); err != nil {
+	info, err := resolveWithActionability(s, context, ep, ClickChecks)
+	if err != nil {
+		r.sendError(session, cmd.ID, err)
+		return
+	}
+	r.captureBeforeSnapshotAfterScroll(session, cmd.Params)
+	if err := TapAtCenter(s, context, info); err != nil {
 		r.sendError(session, cmd.ID, err)
 		return
 	}
