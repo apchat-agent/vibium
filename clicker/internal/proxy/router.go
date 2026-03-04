@@ -597,13 +597,13 @@ func (r *Router) OnClientMessage(client ClientTransport, msg string) {
 		r.dispatch(session, cmd, r.handlePageUnroute)
 		return
 	case "vibium:network.continue":
-		r.dispatch(session, cmd, r.handleNetworkContinue)
+		go r.handleNetworkContinue(session, cmd)
 		return
 	case "vibium:network.fulfill":
-		r.dispatch(session, cmd, r.handleNetworkFulfill)
+		go r.handleNetworkFulfill(session, cmd)
 		return
 	case "vibium:network.abort":
-		r.dispatch(session, cmd, r.handleNetworkAbort)
+		go r.handleNetworkAbort(session, cmd)
 		return
 	case "vibium:page.setHeaders":
 		r.dispatch(session, cmd, r.handlePageSetHeaders)

@@ -66,7 +66,7 @@ export class Route {
   /** Abort the request. */
   async abort(): Promise<void> {
     try {
-      await this.client.send('network.failRequest', {
+      await this.client.send('vibium:network.abort', {
         request: this.requestId,
       });
     } catch (e) {

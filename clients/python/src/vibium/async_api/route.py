@@ -76,7 +76,7 @@ class Route:
     async def abort(self) -> None:
         """Abort the request."""
         try:
-            await self._client.send("network.failRequest", {
+            await self._client.send("vibium:network.abort", {
                 "request": self._request_id,
             })
         except Exception as e:
