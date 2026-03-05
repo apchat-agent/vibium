@@ -80,6 +80,18 @@ await ctx.tracing.start({ screenshots: true, snapshots: true })
 - **screenshots** — captures the page periodically (~100ms), creating a visual filmstrip. Identical frames are deduplicated.
 - **snapshots** — captures the full HTML when the trace stops, so you can inspect the DOM in the viewer.
 
+To reduce trace size, use JPEG format with a lower quality setting:
+
+```javascript
+await ctx.tracing.start({
+  screenshots: true,
+  format: 'jpeg',
+  quality: 0.4,
+})
+```
+
+The default format is JPEG at 0.8 quality. Lowering `quality` produces smaller files — useful for long-running traces or CI where file size matters.
+
 ---
 
 ## Actions
@@ -216,6 +228,8 @@ CLI tracing uses the daemon, which is automatically started when needed.
 | `snapshots` | boolean | `false` | Capture DOM snapshots on stop |
 | `sources` | boolean | `false` | Reserved for future use |
 | `bidi` | boolean | `false` | Record raw BiDi commands in the trace |
+| `format` | `'jpeg'` \| `'png'` | `'jpeg'` | Screenshot image format |
+| `quality` | number | `0.8` | JPEG quality 0.0–1.0 (ignored for PNG) |
 
 ### stop() / stopChunk() Options
 
