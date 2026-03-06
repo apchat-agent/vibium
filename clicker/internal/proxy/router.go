@@ -903,6 +903,11 @@ func (r *Router) closeSession(session *BrowserSession) {
 	// Signal the routing goroutine to stop
 	close(session.stopChan)
 
+	// Remote mode: end the BiDi session so chromedriver closes Chrome
+	if r.connectURL != "" && session.BidiClient != nil {
+		session.BidiClient.SendCommand("session.end", map[string]interface{}{})
+	}
+
 	// Close BiDi connection
 	if session.BidiConn != nil {
 		session.BidiConn.Close()

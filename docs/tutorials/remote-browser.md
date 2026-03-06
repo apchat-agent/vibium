@@ -25,6 +25,18 @@ $(vibium paths | grep Chromedriver | cut -d' ' -f2) --port=9515 --allowed-ips=""
 
 ## Client (your dev machine)
 
+Install vibium locally — this gives you both the CLI (`npx vibium`) and the JS library:
+
+```bash
+npm install vibium
+```
+
+Or install globally for a bare `vibium` command:
+
+```bash
+npm install -g vibium
+```
+
 ### CLI
 
 ```bash
@@ -68,10 +80,6 @@ Or in your Claude Desktop / Claude Code config:
 ```
 
 ### JavaScript
-
-```bash
-npm install vibium
-```
 
 ```javascript
 const { browser } = require('vibium/sync')

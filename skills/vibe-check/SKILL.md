@@ -165,8 +165,7 @@ vibium go https://example.com && vibium map && vibium click @e3 && vibium diff m
 - `vibium highlight "<selector>"` — highlight element visually (3 seconds)
 
 ### Session
-- `vibium quit` — close the browser (daemon keeps running)
-- `vibium close` — alias for quit
+- `vibium close` — close the browser (daemon keeps running)
 - `vibium daemon start` — start background browser
 - `vibium daemon status` — check if running
 - `vibium daemon stop` — stop daemon

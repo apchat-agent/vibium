@@ -6,10 +6,10 @@ import (
 
 func newQuitCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "quit",
-		Aliases: []string{"close"},
+		Use:     "close",
+		Aliases: []string{"quit"},
 		Short:   "Close the browser session",
-		Example: `  vibium quit
+		Example: `  vibium close
   # Close the browser (daemon keeps running)`,
 		Args: cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {

@@ -298,6 +298,10 @@ func (h *Handlers) Call(name string, args map[string]interface{}) (*ToolsCallRes
 
 // Close cleans up any active browser sessions.
 func (h *Handlers) Close() {
+	// Remote mode: end the BiDi session so chromedriver closes Chrome
+	if h.connectURL != "" && h.client != nil {
+		h.client.SendCommand("session.end", map[string]interface{}{})
+	}
 	if h.conn != nil {
 		h.conn.Close()
 		h.conn = nil
