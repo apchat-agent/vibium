@@ -155,7 +155,13 @@ func newBiDiTestCmd() *cobra.Command {
 			fmt.Printf("       WebSocket URL: %s\n", launchResult.WebSocketURL)
 
 			fmt.Println("[3/5] Connecting to BiDi WebSocket...")
-			conn, err := bidi.Connect(launchResult.WebSocketURL)
+			// For system chromedriver, WebSocket URL is not in response, construct it
+			wsURL := launchResult.WebSocketURL
+			if launchResult.IsSystemDriver && wsURL == "" {
+				wsURL = fmt.Sprintf("ws://localhost:%d/session/%s", launchResult.Port, launchResult.SessionID)
+				fmt.Printf("       (constructed for system driver: %s)\n", wsURL)
+			}
+			conn, err := bidi.Connect(wsURL)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error connecting: %v\n", err)
 				os.Exit(1)

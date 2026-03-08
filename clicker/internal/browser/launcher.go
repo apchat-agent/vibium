@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/vibium/clicker/internal/bidi"
@@ -63,6 +64,7 @@ type LaunchResult struct {
 	ChromedriverCmd *exec.Cmd
 	Port            int
 	UserDataDir     string // Chrome temp profile dir — cleaned up on Close()
+	IsSystemDriver  bool   // true if using system chromedriver (not bundled)
 }
 
 // sessionRequest is the payload for creating a new session.
@@ -148,12 +150,23 @@ func Launch(opts LaunchOptions) (*LaunchResult, error) {
 		fmt.Println("       ----------------------------")
 	}
 
+	// Check if using system chromedriver (not from Vibium cache)
+	cftDir, _ := paths.GetChromeForTestingDir()
+	isSystemDriver := cftDir == "" || !strings.HasPrefix(chromedriverPath, cftDir)
+	isSystemBrowser := cftDir == "" || !strings.HasPrefix(chromePath, cftDir)
+	
+	// For system chromedriver, we need to get WebSocket URL from session response
+	// since it doesn't support webSocketUrl capability
+	var wsURLForSystem string
+	
 	// Try BiDi session.new first (direct WebSocket, no HTTP round-trip)
+	// Only use webSocketUrl capability with Vibium's bundled chromedriver
 	wsURL := fmt.Sprintf("ws://localhost:%d/session", port)
 	conn, connErr := bidi.Connect(wsURL)
 	if connErr == nil {
 		client := bidi.NewClient(conn)
-		caps := buildCapabilities(chromePath, opts.Headless)
+		// Use webSocketUrl only with bundled chromedriver
+		caps := buildCapabilities(chromePath, opts.Headless, !isSystemDriver, isSystemBrowser)
 		result, sessionErr := client.SessionNew(caps)
 		if sessionErr == nil {
 			userDataDir, _ := result.Capabilities["userDataDir"].(string)
@@ -164,6 +177,7 @@ func Launch(opts LaunchOptions) (*LaunchResult, error) {
 				ChromedriverCmd: cmd,
 				Port:            port,
 				UserDataDir:     userDataDir,
+				IsSystemDriver:  isSystemDriver,
 			}, nil
 		}
 		log.Debug("BiDi session.new failed, falling back to HTTP", "error", sessionErr)
@@ -173,11 +187,19 @@ func Launch(opts LaunchOptions) (*LaunchResult, error) {
 	}
 
 	// Fallback: HTTP POST /session (original path)
-	sessionID, httpWsURL, userDataDir, err := createSession(baseURL, chromePath, opts.Headless, opts.Verbose)
+	// Use webSocketUrl only with bundled chromedriver
+	sessionID, httpWsURL, userDataDir, err := createSession(baseURL, chromePath, opts.Headless, opts.Verbose, !isSystemDriver, isSystemBrowser)
 	if err != nil {
 		cmd.Process.Kill()
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
+	
+	// For system chromedriver, WebSocket URL is not in response, construct it
+	if isSystemDriver && httpWsURL == "" {
+		wsURLForSystem = fmt.Sprintf("ws://localhost:%d/session/%s", port, sessionID)
+		log.Debug("constructed WebSocket URL for system driver", "url", wsURLForSystem)
+	}
+	
 	log.Info("browser launched via HTTP", "sessionId", sessionID, "wsUrl", httpWsURL)
 
 	return &LaunchResult{
@@ -186,6 +208,7 @@ func Launch(opts LaunchOptions) (*LaunchResult, error) {
 		ChromedriverCmd: cmd,
 		Port:            port,
 		UserDataDir:     userDataDir,
+		IsSystemDriver:  isSystemDriver,
 	}, nil
 }
 
@@ -216,7 +239,22 @@ func waitForChromedriver(baseURL string, timeout time.Duration) error {
 }
 
 // chromeArgs returns the standard Chrome launch arguments.
-func chromeArgs(headless bool) []string {
+func chromeArgs(headless bool, isSystemBrowser bool) []string {
+	// Minimal args for system browsers to avoid compatibility issues
+	if isSystemBrowser {
+		args := []string{
+			"--no-first-run",
+			"--no-default-browser-check",
+			"--disable-dev-shm-usage",
+			"--no-sandbox", // Required for system browsers in container/Docker
+		}
+		if headless {
+			args = append(args, "--headless=new")
+		}
+		return args
+	}
+
+	// Full args for bundled Chrome
 	args := []string{
 		"--no-first-run",
 		"--no-default-browser-check",
@@ -254,33 +292,40 @@ func chromeArgs(headless bool) []string {
 }
 
 // buildCapabilities returns the capabilities map for BiDi session.new.
-func buildCapabilities(chromePath string, headless bool) map[string]interface{} {
-	return map[string]interface{}{
-		"alwaysMatch": map[string]interface{}{
-			"browserName":  "chrome",
-			"webSocketUrl": true,
-			"unhandledPromptBehavior": map[string]interface{}{
-				"default": "ignore",
-			},
-			"goog:chromeOptions": map[string]interface{}{
-				"binary":          chromePath,
-				"args":            chromeArgs(headless),
-				"excludeSwitches": []string{"enable-automation", "enable-logging"},
-				"prefs": map[string]interface{}{
-					"credentials_enable_service":                          false,
-					"profile.password_manager_enabled":                    false,
-					"profile.password_manager_leak_detection":             false,
-					"profile.default_content_setting_values.notifications": 2,
-				},
-			},
+func buildCapabilities(chromePath string, headless bool, useWebSocketUrl bool, isSystemBrowser bool) map[string]interface{} {
+	alwaysMatch := map[string]interface{}{
+		"browserName": "chrome",
+		"goog:chromeOptions": map[string]interface{}{
+			"binary": chromePath,
+			"args":   chromeArgs(headless, isSystemBrowser),
 		},
 	}
+	
+	// Only add excludeSwitches and prefs for bundled Chrome
+	if !isSystemBrowser {
+		alwaysMatch["goog:chromeOptions"].(map[string]interface{})["excludeSwitches"] = []string{"enable-automation", "enable-logging"}
+		alwaysMatch["goog:chromeOptions"].(map[string]interface{})["prefs"] = map[string]interface{}{
+			"credentials_enable_service":                          false,
+			"profile.password_manager_enabled":                    false,
+			"profile.password_manager_leak_detection":             false,
+			"profile.default_content_setting_values.notifications": 2,
+		}
+	}
+	
+	if useWebSocketUrl {
+		alwaysMatch["webSocketUrl"] = true
+	}
+	
+	caps := map[string]interface{}{
+		"alwaysMatch": alwaysMatch,
+	}
+	return caps
 }
 
 // createSession creates a new WebDriver session with BiDi enabled via HTTP.
-func createSession(baseURL, chromePath string, headless, verbose bool) (string, string, string, error) {
+func createSession(baseURL, chromePath string, headless, verbose bool, useWebSocketUrl bool, isSystemBrowser bool) (string, string, string, error) {
 	reqBody := map[string]interface{}{
-		"capabilities": buildCapabilities(chromePath, headless),
+		"capabilities": buildCapabilities(chromePath, headless, useWebSocketUrl, isSystemBrowser),
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
